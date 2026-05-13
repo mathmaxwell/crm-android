@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Call Tracker"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:paddingBottom="16dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Backend URL"
+            android:paddingBottom="4dp" />
+
+        <EditText
+            android:id="@+id/urlEdit"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="http://192.168.1.100:3000"
+            android:inputType="textUri"
+            android:autofillHints="off" />
+
+        <Button
+            android:id="@+id/saveBtn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Save URL" />
+
+        <Button
+            android:id="@+id/testBtn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Send test call" />
+
+        <Button
+            android:id="@+id/batteryBtn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Disable battery optimization" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:fontFamily="monospace"
+            android:textSize="13sp" />
+
+    </LinearLayout>
+</ScrollView>
