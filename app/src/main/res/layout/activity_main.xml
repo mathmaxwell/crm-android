@@ -53,6 +53,13 @@
             android:layout_marginTop="8dp"
             android:text="Disable battery optimization" />
 
+        <Button
+            android:id="@+id/filesBtn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Grant all files access" />
+
         <TextView
             android:id="@+id/statusText"
             android:layout_width="match_parent"
