@@ -29,7 +29,6 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 object ApiClient {
     private const val TAG = "ApiClient"
-    private const val NGROK_HEADER = "ngrok-skip-browser-warning"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -105,7 +104,7 @@ object ApiClient {
      *
      *  Losing an "ended" event leaves the call stuck in "talking" forever on
      *  the dashboard, so this path goes through a retry queue: if the POST
-     *  fails (network down, ngrok hiccup, backend restarting) we re-attempt
+     *  fails (network down, Wi-Fi hiccup, backend restarting) we re-attempt
      *  with exponential backoff until it lands. */
     fun sendEnded(
         context: Context,
@@ -173,7 +172,6 @@ object ApiClient {
             val url = "$baseUrl/api/calls/event"
             val req = Request.Builder()
                 .url(url)
-                .header(NGROK_HEADER, "true")
                 .post(body)
                 .build()
             val ok = try {
@@ -227,7 +225,6 @@ object ApiClient {
                 .toRequestBody("application/json".toMediaType())
             val req = Request.Builder()
                 .url(url)
-                .header(NGROK_HEADER, "true")
                 .patch(body)
                 .build()
             try {
@@ -252,7 +249,7 @@ object ApiClient {
         }
         on.submit {
             val url = "$baseUrl$path"
-            // Short in-task retry: handles ngrok hiccups / Wi-Fi handoffs that
+            // Short in-task retry: handles network hiccups / Wi-Fi handoffs that
             // would otherwise drop the event silently. Multipart bodies aren't
             // re-readable in OkHttp, so build a fresh Request each attempt.
             val maxAttempts = 4
@@ -260,7 +257,6 @@ object ApiClient {
             for (attempt in 1..maxAttempts) {
                 val request = Request.Builder()
                     .url(url)
-                    .header(NGROK_HEADER, "true")
                     .post(body)
                     .build()
                 try {

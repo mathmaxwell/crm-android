@@ -27,7 +27,9 @@ class MainActivity : AppCompatActivity() {
     companion object {
         const val PREFS = "settings"
         const val KEY_URL = "backend_url"
-        const val DEFAULT_URL = "https://cloddily-equilibristic-renna.ngrok-free.dev"
+        /** Backend on the office Wi-Fi; editable in the app. Reserve this IP
+         *  for the backend PC in the router so it doesn't change. */
+        const val DEFAULT_URL = "http://192.168.11.69:3005"
         private const val PERMISSION_REQUEST = 1001
 
         private val MIUI_REC_DIR = File("/sdcard/MIUI/sound_recorder/call_rec")

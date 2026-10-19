@@ -158,7 +158,6 @@ class CommandService : Service() {
         Log.i(TAG, "Connecting WS → $wsUrl")
         val request = Request.Builder()
             .url(wsUrl)
-            .header("ngrok-skip-browser-warning", "true")
             .build()
         webSocket = httpClient.newWebSocket(request, listener)
     }
