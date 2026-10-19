@@ -33,7 +33,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Long-running foreground service that holds an open WebSocket to the backend
  * and listens for `{ type: "command", call_id, action }` messages. On
  * `action=answer` it calls `TelecomManager.acceptRingingCall()`; on
- * `action=reject` it calls `TelecomManager.endCall()`.
+ * `action=reject` it calls `TelecomManager.endCall()`; `action=sms` sends an
+ * SMS from this SIM ([SmsSender]).
  *
  * Both APIs require the runtime `ANSWER_PHONE_CALLS` permission (granted from
  * MainActivity).
@@ -153,7 +154,7 @@ class CommandService : Service() {
         val wsUrl = baseUrl
             .replaceFirst(Regex("^https://"), "wss://")
             .replaceFirst(Regex("^http://"), "ws://")
-            .trimEnd('/') + "/ws?role=apk"
+            .trimEnd('/') + "/ws?role=apk&caps=sms"
 
         Log.i(TAG, "Connecting WS → $wsUrl")
         val request = Request.Builder()
@@ -174,6 +175,8 @@ class CommandService : Service() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             Log.i(TAG, "WS opened (${response.code})")
             reconnectAttempt = 0
+            // Back on the network: SMS events that waited go now.
+            SmsOutbox.flushSoon(applicationContext, 0L)
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -208,6 +211,12 @@ class CommandService : Service() {
             "answer" -> acceptIncoming()
             "reject" -> rejectIncoming()
             "dial"   -> dial(json.optString("phone"))
+            "sms"    -> SmsSender.send(
+                applicationContext,
+                json.optString("sms_id"),
+                json.optString("phone"),
+                json.optString("text"),
+            )
             else -> Log.w(TAG, "Unknown action: $action")
         }
     }
@@ -310,7 +319,7 @@ class CommandService : Service() {
         val notif: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_phone_call)
             .setContentTitle("Call Tracker")
-            .setContentText("Listening for answer/reject commands")
+            .setContentText("Listening for call and SMS commands")
             .setOngoing(true)
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

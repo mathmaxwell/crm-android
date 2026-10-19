@@ -116,6 +116,10 @@ class MainActivity : AppCompatActivity() {
         val batteryOk = pm.isIgnoringBatteryOptimizations(packageName)
         val allFiles = hasAllFilesAccess()
         val recCount = countMiuiRecordings()
+        val smsOk = listOf(Manifest.permission.RECEIVE_SMS, Manifest.permission.SEND_SMS).all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
+        val smsWaiting = SmsOutbox.pending(this)
 
         statusText.text = buildString {
             append("Backend URL:\n$url\n\n")
@@ -129,6 +133,9 @@ class MainActivity : AppCompatActivity() {
                     else -> "✅ $recCount file(s) present"
                 } + "\n"
             )
+            // MIUI also asks in Security → Permissions → «Отправка SMS».
+            append("SMS: ${if (smsOk) "✅ receive + send allowed" else "❌ allow SMS (MIUI: also «Send SMS» in app permissions)"}\n")
+            if (smsWaiting > 0) append("SMS events waiting for the backend: $smsWaiting\n")
         }
     }
 
@@ -139,6 +146,8 @@ class MainActivity : AppCompatActivity() {
             Manifest.permission.READ_CONTACTS,
             Manifest.permission.ANSWER_PHONE_CALLS,
             Manifest.permission.CALL_PHONE,
+            Manifest.permission.RECEIVE_SMS,
+            Manifest.permission.SEND_SMS,
         )
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             list.add(Manifest.permission.READ_PHONE_NUMBERS)

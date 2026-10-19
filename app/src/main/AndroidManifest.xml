@@ -8,6 +8,10 @@
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- SMS through the CRM («Чаты → SMS»): received ones go to the backend,
+         the CRM's go out from this SIM. -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <!-- Android ≤ 10: MANAGE_EXTERNAL_STORAGE doesn't exist, MIUI recordings
          are read via the legacy storage permission instead. -->
@@ -52,6 +56,21 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".SmsReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter android:priority="999">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".SmsStatusReceiver"
+            android:enabled="true"
+            android:exported="false" />
 
         <service
             android:name=".CallUploadService"
