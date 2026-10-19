@@ -15,6 +15,7 @@ import java.util.ArrayDeque
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -37,7 +38,11 @@ object ApiClient {
         .retryOnConnectionFailure(true)
         .build()
 
+    // Call events (ringing/answered/caller patch) get their own thread so a
+    // slow recording upload from the previous call never delays the next
+    // call's "ringing" — the card must pop while the phone is still ringing.
     private val executor = Executors.newSingleThreadExecutor()
+    private val uploadExecutor = Executors.newSingleThreadExecutor()
     private val scheduler = Executors.newSingleThreadScheduledExecutor()
     private val isoFormatter = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
         timeZone = TimeZone.getTimeZone("UTC")
@@ -58,6 +63,7 @@ object ApiClient {
         val durationSec: Long,
         val status: String,
         val audioSource: String,
+        val caller: String?,
         var nextDelayMs: Long,
     )
 
@@ -81,12 +87,14 @@ object ApiClient {
         post(context, "/api/calls/event", body, "ringing $caller")
     }
 
-    fun sendAnswered(context: Context, callId: String, atMillis: Long) {
+    /** [caller] lets the backend create the call if "ringing" never arrived. */
+    fun sendAnswered(context: Context, callId: String, atMillis: Long, caller: String? = null) {
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("event", "answered")
             .addFormDataPart("call_id", callId)
             .addFormDataPart("at", isoFormatter.format(Date(atMillis)))
+            .apply { if (!caller.isNullOrBlank()) addFormDataPart("caller", caller) }
             .build()
         post(context, "/api/calls/event", body, "answered")
     }
@@ -106,10 +114,11 @@ object ApiClient {
         durationSec: Long,
         status: String,
         audioSource: String = "none",
+        caller: String? = null,
     ) {
         enqueueEnded(
             context,
-            EndedEvent(callId, atMillis, durationSec, status, audioSource, nextDelayMs = 0L),
+            EndedEvent(callId, atMillis, durationSec, status, audioSource, caller, nextDelayMs = 0L),
         )
     }
 
@@ -159,6 +168,7 @@ object ApiClient {
                 .addFormDataPart("duration_sec", ev.durationSec.toString())
                 .addFormDataPart("status", ev.status)
                 .addFormDataPart("audio_source", ev.audioSource)
+                .apply { if (!ev.caller.isNullOrBlank()) addFormDataPart("caller", ev.caller) }
                 .build()
             val url = "$baseUrl/api/calls/event"
             val req = Request.Builder()
@@ -205,7 +215,7 @@ object ApiClient {
             .addFormDataPart("audio", audioFile.name, audioFile.asRequestBody(mime.toMediaType()))
             .build()
         post(context, "/api/calls/$callId/audio", body,
-            "audio src=$audioSource size=${audioFile.length()}b")
+            "audio src=$audioSource size=${audioFile.length()}b", uploadExecutor)
     }
 
     /** Updates the caller phone number on an existing call (when initially "unknown"). */
@@ -230,11 +240,17 @@ object ApiClient {
         }
     }
 
-    private fun post(context: Context, path: String, body: RequestBody, label: String) {
+    private fun post(
+        context: Context,
+        path: String,
+        body: RequestBody,
+        label: String,
+        on: ExecutorService = executor,
+    ) {
         val baseUrl = baseUrl(context) ?: run {
             Log.w(TAG, "Backend URL not set — skipping ($label)"); return
         }
-        executor.submit {
+        on.submit {
             val url = "$baseUrl$path"
             // Short in-task retry: handles ngrok hiccups / Wi-Fi handoffs that
             // would otherwise drop the event silently. Multipart bodies aren't

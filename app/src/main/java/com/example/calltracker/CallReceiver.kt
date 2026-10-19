@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.telephony.TelephonyManager
 import android.util.Log
 import java.util.UUID
@@ -40,6 +41,11 @@ class CallReceiver : BroadcastReceiver() {
         @Volatile private var ringStartMillis: Long = 0
         @Volatile private var answerMillis: Long = 0
 
+        /** elapsedRealtime of the last PHONE_STATE broadcast. The reconciler in
+         *  [CommandService] only trusts a polled IDLE that lasted well past it. */
+        @Volatile var lastBroadcastElapsed: Long = 0L
+            private set
+
         /** Set by [CommandService] right before it fires ACTION_CALL so this
          *  receiver can associate the resulting OFFHOOK with the dialed phone. */
         @Volatile var pendingOutgoing: PendingOutgoing? = null
@@ -63,12 +69,18 @@ class CallReceiver : BroadcastReceiver() {
                 val durationSec = if (answerMillis > 0) (now - answerMillis) / 1000 else 0L
                 val status = if (answerMillis > 0) "answered" else "missed"
                 Log.w(TAG, "forceEndIfIdle: flushing stale call $callId (broadcast missed?)")
-                ApiClient.sendEnded(context.applicationContext, callId, now, durationSec, status)
+                ApiClient.sendEnded(
+                    context.applicationContext, callId, now, durationSec, status,
+                    caller = incomingNumber,
+                )
                 currentCallId = null
                 incomingNumber = null
                 ringStartMillis = 0
                 answerMillis = 0
                 pendingOutgoing = null
+                // Without this a stale RINGING would make the next real
+                // incoming call look like a duplicate broadcast and be skipped.
+                lastState = TelephonyManager.EXTRA_STATE_IDLE
                 return true
             }
             // OFFHOOK never fired after a dial command — the call placement
@@ -78,7 +90,10 @@ class CallReceiver : BroadcastReceiver() {
             val pending = pendingOutgoing
             if (pending != null && now - pending.createdAt > 5_000L) {
                 Log.w(TAG, "forceEndIfIdle: flushing orphaned pendingOutgoing ${pending.callId}")
-                ApiClient.sendEnded(context.applicationContext, pending.callId, now, 0, "rejected")
+                ApiClient.sendEnded(
+                    context.applicationContext, pending.callId, now, 0, "rejected",
+                    caller = pending.phone,
+                )
                 pendingOutgoing = null
                 return true
             }
@@ -100,10 +115,14 @@ class CallReceiver : BroadcastReceiver() {
         val app = context.applicationContext
 
         Log.d(TAG, "state=$state number=$number lastState=$lastState callId=$currentCallId")
+        lastBroadcastElapsed = SystemClock.elapsedRealtime()
 
         when (state) {
             TelephonyManager.EXTRA_STATE_RINGING -> {
-                if (lastState != TelephonyManager.EXTRA_STATE_RINGING) {
+                // A second RINGING for the same call (Android 9+ sends a twin
+                // with the number) only patches the caller; anything else is a
+                // new call — including RINGING after a reconciler flush.
+                if (lastState != TelephonyManager.EXTRA_STATE_RINGING || currentCallId == null) {
                     val initial = number?.takeIf { it.isNotBlank() } ?: "unknown"
                     val callId = UUID.randomUUID().toString()
                     currentCallId = callId
@@ -127,7 +146,7 @@ class CallReceiver : BroadcastReceiver() {
                 ) {
                     // Incoming call answered.
                     answerMillis = System.currentTimeMillis()
-                    ApiClient.sendAnswered(app, callId, answerMillis)
+                    ApiClient.sendAnswered(app, callId, answerMillis, caller = incomingNumber)
                 } else if (callId == null && lastState == TelephonyManager.EXTRA_STATE_IDLE) {
                     // Outgoing call (no RINGING preceded). Pair with the most
                     // recent dial command if we got one in time.
@@ -162,7 +181,7 @@ class CallReceiver : BroadcastReceiver() {
                     // Flip status now so the dashboard widget exits the
                     // talking state immediately. Audio (if any) is attached
                     // later by CallUploadService via the dedicated endpoint.
-                    ApiClient.sendEnded(app, callId, now, durationSec, status)
+                    ApiClient.sendEnded(app, callId, now, durationSec, status, caller = incomingNumber)
 
                     if (answerMillis > 0) {
                         startUploadService(

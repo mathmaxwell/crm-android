@@ -13,6 +13,7 @@ import android.content.pm.ServiceInfo
 import android.net.Uri
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.telecom.TelecomManager
 import android.telephony.TelephonyManager
 import android.util.Log
@@ -43,6 +44,9 @@ class CommandService : Service() {
         private const val TAG = "CommandService"
         private const val NOTIF_ID = 4244
         private const val CHANNEL_ID = "command_listener"
+        /** How long the polled state must stay IDLE before the reconciler
+         *  ends a call the receiver still thinks is live. */
+        private const val RECONCILE_IDLE_MS = 10_000L
 
         const val ACTION_START = "com.example.calltracker.action.START_COMMAND"
 
@@ -67,6 +71,7 @@ class CommandService : Service() {
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var reconnectAttempt = 0
     private var pollStarted = false
+    private var idleSinceElapsed = 0L
     private val pollRunnable: Runnable = object : Runnable {
         override fun run() {
             try { pollPhoneState() } catch (_: Exception) {}
@@ -97,7 +102,13 @@ class CommandService : Service() {
     /** Safety net: PHONE_STATE broadcasts can be dropped (battery savers,
      *  background restrictions). Poll TelephonyManager every 2 s and force the
      *  receiver to flush its state if it still thinks there's an active call
-     *  but the phone is actually idle. */
+     *  but the phone has been idle for a while.
+     *
+     *  A single IDLE reading is not trusted: while MIUI screens an incoming
+     *  call (spam check) the polled state reads IDLE even though RINGING was
+     *  already broadcast, which used to end live calls ~2 s after they
+     *  started. Flush only after IDLE held for [RECONCILE_IDLE_MS] with no
+     *  PHONE_STATE broadcast in between. */
     @SuppressLint("MissingPermission")
     private fun pollPhoneState() {
         val tm = getSystemService(TELEPHONY_SERVICE) as? TelephonyManager ?: return
@@ -107,9 +118,19 @@ class CommandService : Service() {
         } catch (_: SecurityException) {
             @Suppress("DEPRECATION") tm.callState
         }
-        val idle = state == TelephonyManager.CALL_STATE_IDLE
-        if (idle && CallReceiver.forceEndIfIdle(applicationContext, true)) {
-            Log.i(TAG, "Reconciler flushed a stale call (phone is IDLE)")
+        val now = SystemClock.elapsedRealtime()
+        if (state != TelephonyManager.CALL_STATE_IDLE) {
+            idleSinceElapsed = 0L
+            return
+        }
+        // The streak must start after the latest broadcast, so an old idle
+        // period never counts toward a call that just started ringing.
+        if (idleSinceElapsed == 0L || idleSinceElapsed < CallReceiver.lastBroadcastElapsed) {
+            idleSinceElapsed = now
+        }
+        if (now - idleSinceElapsed < RECONCILE_IDLE_MS) return
+        if (CallReceiver.forceEndIfIdle(applicationContext, true)) {
+            Log.i(TAG, "Reconciler flushed a stale call (phone IDLE for ${now - idleSinceElapsed} ms)")
         }
     }
 
@@ -209,7 +230,7 @@ class CommandService : Service() {
         val now = System.currentTimeMillis()
         CallReceiver.pendingOutgoing = CallReceiver.Companion.PendingOutgoing(callId, phone, now)
         ApiClient.sendRinging(applicationContext, callId, phone, now)
-        ApiClient.sendAnswered(applicationContext, callId, now)
+        ApiClient.sendAnswered(applicationContext, callId, now, caller = phone)
 
         try {
             val intent = Intent(Intent.ACTION_CALL, Uri.fromParts("tel", phone, null))
